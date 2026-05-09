@@ -564,17 +564,24 @@ exports.getCurrentUser = async (req, res) => {
 
         // ========== 缓存读取 ==========
         if (redis.isConnected()) {
-            const cacheKey = `user:info:${userUUID}`;
-            const cached = await redis.pHgetall(cacheKey);
-            if (cached && cached.username) {
-                // 反序列化嵌套对象
-                const user = { ...cached };
-                if (user.studentInfo) user.studentInfo = JSON.parse(user.studentInfo);
-                if (user.employerInfo) user.employerInfo = JSON.parse(user.employerInfo);
-                console.log('[用户信息] 缓存命中:', userUUID);
-                return res.status(200).json({ success: true, data: user });
+            try {
+                const cacheKey = `user:info:${userUUID}`;
+                const cached = await redis.pHgetall(cacheKey);
+                if (cached && cached.username && cached.userUUID === userUUID) {  // ← 增加 userUUID 校验
+                    const user = { ...cached };
+                    if (user.studentInfo) user.studentInfo = JSON.parse(user.studentInfo);
+                    if (user.employerInfo) user.employerInfo = JSON.parse(user.employerInfo);
+                    console.log('[用户信息] 缓存命中:', userUUID);
+                    return res.status(200).json({ success: true, data: user });
+                }
+                // 缓存数据异常，清除并重新查询
+                if (cached && cached.userUUID !== userUUID) {
+                    console.warn('[用户信息] 缓存数据 userUUID 不匹配，清除缓存');
+                    await redis.pDel(cacheKey);
+                }
+            } catch (err) {
+                console.warn('[用户信息] 缓存读取异常，回退数据库查询:', err.message);
             }
-            console.log('[用户信息] 缓存未命中:', userUUID);
         }
 
 
@@ -649,6 +656,7 @@ exports.logoutUser = async (req, res) => {
             sameSite: 'lax',
             path: '/'
         });
+
 
         console.log('[登出成功] Cookie已清除, userUUID:', userUUID);
 

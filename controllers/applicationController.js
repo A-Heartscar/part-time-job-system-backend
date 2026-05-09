@@ -376,11 +376,12 @@ exports.getJobApplications = async (req, res) => {
         const employerUUID = req.user.userUUID;
         const { page = 1, limit = 20, status } = req.query;
 
-        if (redis.isConnected()) {
-            const cacheKey = `applications:job:${jobId}:${status || 'all'}:${page}`;
-            const cached = await redis.pGet(cacheKey);
-            if (cached) return res.json({ success: true, ...JSON.parse(cached) });
-        }
+        // // ========== 缓存读取 ==========
+        // if (redis.isConnected()) {
+        //     const cacheKey = `applications:job:${jobId}:${status || 'all'}:${page}`;
+        //     const cached = await redis.pGet(cacheKey);
+        //     if (cached) return res.json({ success: true, ...JSON.parse(cached) });
+        // }
 
         console.log('[岗位投递列表] ========== 开始查询 ==========');
         console.log('[岗位投递列表] 参数:', { jobId, employerUUID, page, limit, status });
@@ -448,20 +449,20 @@ exports.getJobApplications = async (req, res) => {
         console.log('[岗位投递列表] 查询完成:', { total, returned: enrichedApplications.length });
         console.log('[岗位投递列表] ========== 查询完成 ==========');
 
-        // ========== 缓存回写 ==========
-        if (redis.isConnected()) {
-            const cacheKey = `applications:job:${jobId}:${status || 'all'}:${page}`;
-            const cacheData = {
-                data: enrichedApplications,
-                stats,
-                pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    total,
-                    pages: Math.ceil(total / parseInt(limit))
-                } };
-            await redis.pSetex(cacheKey, 120, JSON.stringify(cacheData)); // 2分钟
-        }
+        // // ========== 缓存回写 ==========
+        // if (redis.isConnected()) {
+        //     const cacheKey = `applications:job:${jobId}:${status || 'all'}:${page}`;
+        //     const cacheData = {
+        //         data: enrichedApplications,
+        //         stats,
+        //         pagination: {
+        //             page: parseInt(page),
+        //             limit: parseInt(limit),
+        //             total,
+        //             pages: Math.ceil(total / parseInt(limit))
+        //         } };
+        //     await redis.pSetex(cacheKey, 120, JSON.stringify(cacheData)); // 2分钟
+        // }
 
         res.json({
             success: true,
@@ -557,7 +558,18 @@ exports.updateApplicationStatus = async (req, res) => {
 
         // 所有状态变更都发送站内信通知，仅面试环节额外发送邮件
         await sendStatusChangeNotification(application, status, employerNotes, req);
-
+        // ========== 在 application.save() 之后，添加以下缓存清除代码 ==========
+        // 清除该岗位的雇主端投递列表缓存
+        if (redis.isConnected()) {
+            const jobId = application.jobId.toString();
+            // 删除该岗位所有状态+分页组合的缓存（使用通配符模式）
+            const cachePattern = `applications:job:${jobId}:*`;
+            const keys = await redis.keys(`ptjob:${cachePattern}`);
+            if (keys.length > 0) {
+                await redis.del(keys);
+                console.log('[缓存] 投递状态更新：已清除岗位投递列表缓存，数量:', keys.length);
+            }
+        }
         console.log('[更新投递状态] 更新成功:', {
             id,
             oldStatus: currentStatus,

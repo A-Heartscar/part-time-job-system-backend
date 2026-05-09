@@ -22,30 +22,34 @@ const authMiddleware = async (req, res, next) => {
         let token = null;
 
 
-        // ========== 1. 遍历 Cookie 中的 token_{uuid} 格式键 ==========
-        if ( req.cookies ) {
-            const cookieKeys = Object.keys(req.cookies);
+        // ========== 1. 优先使用旧版通用 'token' Cookie ==========
+        // loginUser 中每次登录都会更新这个 Cookie，它永远指向最后登录的用户
+        if (req.cookies && req.cookies.token) {
+            try {
+                await verifyToken(req.cookies.token);
+                token = req.cookies.token;
+                console.log('[JWT验证] 从通用 token Cookie 获取成功');
+            } catch (e) {
+                // token 无效，继续尝试其他来源
+                console.log('[JWT验证] 通用 token Cookie 无效，尝试其他来源');
+            }
+        }
 
+        // ========== 2. 遍历 token_{uuid} Cookie（兜底） ==========
+        if (!token && req.cookies) {
+            const cookieKeys = Object.keys(req.cookies);
             for (const key of cookieKeys) {
                 if (key.startsWith('token_') && key !== 'token_admin') {
                     try {
                         const decoded = await verifyToken(req.cookies[key]);
-                        if (key === `token_${decoded.userUUID}`) {
-                            token = req.cookies[key];
-                            console.log('[JWT验证] 从 Cookie', key, '获取 token 成功');
-                            break;
-                        }
+                        token = req.cookies[key];
+                        console.log('[JWT验证] 从 Cookie', key, '获取 token 成功');
+                        break;
                     } catch (e) {
                         continue;
                     }
                 }
             }
-        }
-
-        // ========== 2. 回退到旧版 'token' Cookie（向后兼容） ==========
-        if (!token && req.cookies && req.cookies.token) {
-            token = req.cookies.token;
-            console.log('[JWT验证] 从旧版 token Cookie 获取成功（兼容模式）');
         }
 
         // ========== 3. 从 Authorization Header 获取（备选） ==========

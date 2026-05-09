@@ -877,7 +877,7 @@ exports.getJobDetail = async (req, res) => {
                     hasApplied,
                     applicationStatus,
                     applicationId,
-                    canReapply: applicationStatus === 'rejected',
+                    canReapply: ['rejected', 'completed'].includes(applicationStatus),
                     studentResumes: userRole === 'student' ? studentResumes : undefined
                 }
             }
